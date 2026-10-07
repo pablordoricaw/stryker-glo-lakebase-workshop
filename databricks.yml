@@ -1,0 +1,296 @@
+# Global Logistics Command Center — Databricks Asset Bundle
+#
+# Re-creates MedTranz Global's logistics-exception demo on any workspace:
+#   schema + raw_data volume + SDP pipeline + AI/BI dashboard + the Command
+#   Center app shell (created by `bundle deploy`); then a setup job fills them
+#   in on `bundle run`:
+#     generate_data → run_pipeline → deploy_gold_and_metrics
+#     → deploy_genie → grant_app_uc → export_resources (exits a JSON manifest).
+#
+# This demo ships NO Knowledge Assistant, Multi-Agent Supervisor, or ML model —
+# the assistant is an OpenAI Agents loop that calls the Genie space directly and
+# writes operational actions to Lakebase.
+#
+# ── 5-command deploy (the user runs these — see dab_instructions.md) ─────────
+#   1. ./app/scripts/lakebase_setup_db.sh --db-name dbgen_glcc_e302b2
+#   2. databricks bundle deploy --var catalog=… --var schema=… --var warehouse_id=…
+#   3. databricks bundle run glcc_setup --var …
+#   4. ./app/scripts/lakebase_grant_app_credential.sh --app-name … --project-id … --db-name …
+#   5. ./app/scripts/finalize_app.sh
+#
+# Why the app env is finalized OUTSIDE the bundle (steps 3+5): the Genie space
+# ID only exists AFTER the setup job's SDK task runs, so the bundle can't know
+# it at `deploy` time. export_resources exits a JSON with every ID;
+# finalize_app.sh reads it back and writes app.yaml's env — one source of truth.
+#
+# ⚠️ NEVER `databricks apps update --json` the deployed app out of band — it
+#    replaces the whole spec and drops the `postgres` binding (→ Lakebase SP role
+#    deprovisioned → Postgres auth fails). Change app config ONLY here (+ redeploy)
+#    or in app.yaml (+ finalize_app.sh).
+
+bundle:
+  name: glcc
+
+variables:
+  catalog:
+    description: "Unity Catalog for the Global Logistics Command Center resources"
+    default: "solution_builder"
+  schema:
+    description: "Schema within the catalog (created by this bundle)"
+    default: "demo_global_logistics_exception_cockpit_e302b2"
+  warehouse_id:
+    description: "SQL Warehouse ID — powers the dashboard, Genie space, and app analytics"
+
+  # ── App + Lakebase ─────────────────────────────────────────────────────────
+  app_name:
+    description: "Workspace app name (must be unique per workspace)"
+    default: "dbgen-glcc"
+  lakebase_project_slug:
+    description: |
+      Lakebase project SLUG (the human name, NOT the UUID) — used in resource
+      PATHS `projects/<slug>/branches/...`, which resolve by slug. Reused if it
+      already exists. Distinct from resources.json's `lakebase_project_id`,
+      which holds the project UUID for the workspace UI link.
+    default: "dbdemos-asset-generator-6"
+  lakebase_branch_id:
+    description: "Lakebase branch within the project"
+    default: "production"
+  lakebase_database_name:
+    description: "Postgres database name"
+    default: "dbgen_glcc_e302b2"
+  lakebase_database_id:
+    description: |
+      Lakebase database resource ID — the slug in the App's `postgres` binding
+      path. Convention: `db-` + database_name with underscores → hyphens.
+      Created by app/scripts/lakebase_setup_db.sh.
+    default: "db-dbgen-glcc-e302b2"
+
+  # NOTE: the app's runtime env vars are NOT defined here. They're assembled by
+  # app/scripts/finalize_app.sh after the setup job runs (it harvests the
+  # export_resources task's exit JSON — the Genie space ID the bundle can't know
+  # at deploy time — and writes app.yaml's env). One source of truth for app env.
+
+# Build the app locally before sync — produces app/dist/server.js +
+# app/client/dist/ (both gitignored). sync.include whitelists them past
+# .gitignore so the Apps container has them.
+artifacts:
+  default:
+    build: ./app/scripts/build-app.sh
+
+sync:
+  include:
+    - "src/**"
+    - "app/dist/**"          # tsdown output (server bundle)
+    - "app/client/dist/**"   # vite output (client bundle)
+    - "app/drizzle/**"       # generated Drizzle SQL migrations (gitignored;
+                             # build-app.sh runs db:generate → runMigrations()
+                             # reads dist/../drizzle at boot)
+  exclude:
+    - "app/node_modules/**"
+    - "app/.venv/**"
+    - "app/.env"
+    - "app/.env.*"
+    - "app/.preview.pgid"
+    - "app/.DS_Store"
+    - "app/playwright-report/**"
+    - "app/test-results/**"
+    - "app/tests/**"
+
+targets:
+  dev:
+    default: true
+    mode: development   # prefixes resource names with `[dev <user>]` + the
+                        # schema with `dev_<user>_`. Tasks resolve the schema
+                        # via ${resources.schemas.glcc_schema.name} so they hit
+                        # the prefixed schema. ⚠️ The SDP SQL bronze read_files()
+                        # paths are literal (solution_builder/<base schema>) — in
+                        # dev-mode update them to the prefixed schema, or deploy
+                        # with mode: production. See dab_instructions.md.
+  prod:
+    mode: production
+    resources:
+      pipelines:
+        glcc_pipeline:
+          development: false   # production pipelines can't run in dev mode
+
+resources:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Schema + raw landing-zone volume
+  # ──────────────────────────────────────────────────────────────────────────
+  schemas:
+    glcc_schema:
+      name: ${var.schema}
+      catalog_name: ${var.catalog}
+      comment: "Global Logistics Command Center — MedTranz Global shipments, inventory, delivery performance, and exception resolution"
+
+  volumes:
+    raw_data:
+      catalog_name: ${var.catalog}
+      schema_name: ${var.schema}
+      name: "raw_data"
+      volume_type: "MANAGED"
+      comment: "Raw parquet landing zone: warehouses, hospitals, products, shipments (1M), inventory (50K)"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # SDP pipeline — silver_shipments → gold_shipments / gold_inventory /
+  # gold_delivery_performance. (gold_exception_resolution + the two metric
+  # views are built by the deploy_gold_and_metrics task, not here — they're not
+  # DLT statements.)
+  # ──────────────────────────────────────────────────────────────────────────
+  pipelines:
+    glcc_pipeline:
+      name: "[${bundle.target}] Global Logistics Command Center Pipeline"
+      catalog: ${resources.schemas.glcc_schema.catalog_name}
+      target: ${resources.schemas.glcc_schema.name}
+      serverless: true
+      photon: true
+      development: true
+      channel: current
+      libraries:
+        - file:
+            path: ./src/pipeline/01_silver_shipments.sql
+        - file:
+            path: ./src/pipeline/02_gold_shipments.sql
+        - file:
+            path: ./src/pipeline/02_gold_inventory.sql
+        - file:
+            path: ./src/pipeline/02_gold_delivery_performance.sql
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # AI/BI dashboard — dataset_catalog / dataset_schema rebind the embedded
+  # queries per-target (the committed JSON uses unqualified table names).
+  # Requires CLI v0.283.0+.
+  # ──────────────────────────────────────────────────────────────────────────
+  dashboards:
+    glcc_dashboard:
+      display_name: "[${bundle.target}] Global Logistics Command Center — SLA & Exceptions"
+      file_path: ./src/dashboard/dashboard.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${resources.schemas.glcc_schema.catalog_name}
+      dataset_schema: ${resources.schemas.glcc_schema.name}
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Databricks App — the Command Center (AppKit; Genie + Lakebase write-backs).
+  # ──────────────────────────────────────────────────────────────────────────
+  apps:
+    glcc_app:
+      name: ${var.app_name}
+      description: "Global Logistics Command Center — exception cockpit with an embedded Genie-backed assistant that drafts reroutes/escalations/holds and commits them to Lakebase on approval"
+      source_code_path: ./app
+      lifecycle:
+        prevent_destroy: true   # stateful — don't let `bundle destroy` nuke it
+      # OBO scopes for the user token. API-recognized scope STRINGS (different
+      # vocabulary from app.yaml's user_authorization.scopes — set both).
+      user_api_scopes:
+        - serving.serving-endpoints   # OpenAI Agents loop → /serving-endpoints/responses
+        - ai-gateway                  # ⚠️ REQUIRED for the Responses API (routes
+                                      # through AI Gateway; without it the OBO
+                                      # token is rejected "403 Invalid Token").
+        - dashboards.genie            # ask_genie → Genie space
+        - sql                         # SQL warehouse
+        - sql.statement-execution     # synchronous SQL exec
+        - postgres                    # Lakebase
+        - catalog.catalogs:read
+        - catalog.schemas:read
+        - catalog.tables:read
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: postgres
+          postgres:
+            branch: projects/${var.lakebase_project_slug}/branches/${var.lakebase_branch_id}
+            database: projects/${var.lakebase_project_slug}/branches/${var.lakebase_branch_id}/databases/${var.lakebase_database_id}
+            permission: CAN_CONNECT_AND_CREATE
+      # Plain-value env (catalog/schema/dashboard/genie IDs) is NOT here —
+      # finalize_app.sh writes it into app.yaml after the setup job. The
+      # binding-derived vars (DATABRICKS_WAREHOUSE_ID, LAKEBASE_ENDPOINT) come
+      # from the bindings above via app.yaml `valueFrom:` entries.
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Setup job — runs AFTER `bundle deploy` creates the resource shells.
+  # ──────────────────────────────────────────────────────────────────────────
+  jobs:
+    glcc_setup:
+      name: "[${bundle.target}] Global Logistics Command Center Setup"
+      description: "data → pipeline → gold table + metric views → genie → app UC grants → export IDs"
+      tasks:
+        - task_key: generate_data
+          notebook_task:
+            notebook_path: ./src/data_generation/generate_data.py
+            base_parameters:
+              catalog: ${resources.schemas.glcc_schema.catalog_name}
+              schema:  ${resources.schemas.glcc_schema.name}
+          environment_key: sdk_default
+
+        - task_key: run_pipeline
+          depends_on: [{ task_key: generate_data }]
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.glcc_pipeline.id}
+
+        # gold_exception_resolution (plain CREATE TABLE) + the two UC metric
+        # views (CREATE … WITH METRICS LANGUAGE YAML). Neither is a DLT
+        # statement, so they run here after the pipeline built gold_shipments +
+        # gold_delivery_performance.
+        - task_key: deploy_gold_and_metrics
+          depends_on: [{ task_key: run_pipeline }]
+          notebook_task:
+            notebook_path: ./src/metric_view/deploy_gold_and_metrics.py
+            base_parameters:
+              catalog: ${resources.schemas.glcc_schema.catalog_name}
+              schema:  ${resources.schemas.glcc_schema.name}
+          environment_key: sdk_default
+
+        - task_key: deploy_genie
+          depends_on: [{ task_key: deploy_gold_and_metrics }]
+          notebook_task:
+            notebook_path: ./src/deploy/deploy_genie.py
+            base_parameters:
+              catalog:      ${resources.schemas.glcc_schema.catalog_name}
+              schema:       ${resources.schemas.glcc_schema.name}
+              warehouse_id: ${var.warehouse_id}
+          environment_key: sdk_latest
+
+        # Grant the app SP UC read privileges (USE_CATALOG/SCHEMA, SELECT,
+        # READ_VOLUME). Without these the app's first /api/config hits
+        # INSUFFICIENT_PERMISSIONS. (Distinct from lakebase_grant_app_credential.sh,
+        # which grants on the Postgres plane.)
+        - task_key: grant_app_uc
+          depends_on: [{ task_key: deploy_gold_and_metrics }]
+          notebook_task:
+            notebook_path: ./src/deploy/grant_app_uc.py
+            base_parameters:
+              catalog:  ${resources.schemas.glcc_schema.catalog_name}
+              schema:   ${resources.schemas.glcc_schema.name}
+              app_name: ${var.app_name}
+          environment_key: sdk_latest
+
+        # Final task: exit a JSON manifest of every resolved ID. finalize_app.sh
+        # reads it back via get-run-output (the notebook exit value IS
+        # retrievable post-run; task-values are NOT).
+        - task_key: export_resources
+          depends_on: [{ task_key: deploy_genie }, { task_key: grant_app_uc }]
+          notebook_task:
+            notebook_path: ./src/deploy/export_resources.py
+            base_parameters:
+              app_name:       ${var.app_name}
+              catalog:        ${resources.schemas.glcc_schema.catalog_name}
+              schema:         ${resources.schemas.glcc_schema.name}
+              dashboard_id:   ${resources.dashboards.glcc_dashboard.id}
+              pipeline_id:    ${resources.pipelines.glcc_pipeline.id}
+              warehouse_id:   ${var.warehouse_id}
+              genie_space_id: "{{tasks.deploy_genie.values.genie_space_id}}"
+          environment_key: sdk_latest
+
+      # Serverless environments. `client: "4"` is the standard tier. The Genie
+      # API needs databricks-sdk>=0.114.0.
+      environments:
+        - environment_key: sdk_default
+          spec:
+            client: "4"
+        - environment_key: sdk_latest
+          spec:
+            client: "4"
+            dependencies:
+              - "databricks-sdk>=0.114.0"

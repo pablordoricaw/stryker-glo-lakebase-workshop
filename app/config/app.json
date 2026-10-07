@@ -1,0 +1,60 @@
+{
+  // Global Logistics Command Center — app config (JSONC).
+  // Loaded by server/server.ts loadAppConfig. ${VAR} / ${VAR:default}
+  // placeholders are substituted from process.env BEFORE JSON parse, so
+  // resource IDs live in .env (local/preview) or the DAB (deployed).
+  //
+  // This demo uses GENIE, not MAS. masEndpointName stays empty; genieSpaceId
+  // drives the agent's ask_genie tool (server/agent/tools/genie.ts).
+
+  "masEndpointName": "${MAS_ENDPOINT_NAME:}",
+  "genieSpaceId": "${GENIE_SPACE_ID:}",
+
+  // Agent LLM — needs the Responses API (openai/v1/responses).
+  "agentModel": "databricks-gpt-5-4",
+
+  "mlflowExperimentId": "",
+  "agentMlflowExperimentPath": "${AGENT_MLFLOW_EXPERIMENT_PATH:}",
+
+  // Embedded AI/BI dashboard — from DASHBOARD_ID env (.env / DAB).
+  "dashboardId": "${DASHBOARD_ID:__LATE_FILL_DASHBOARD__}",
+
+  // Workspace resource IDs → deep-link URLs on /platform.
+  "pipelineId": "${PIPELINE_ID:}",
+  "warehouseId": "${WAREHOUSE_ID:}",
+  "lakebaseProjectId": "${LAKEBASE_PROJECT_ID:}",
+  "appUrl": "${APP_URL:}",
+
+  // Delta source for the boot-time Lakebase mirror (server/db/sync.ts).
+  // Logical name → gold table. These are the three the brief names.
+  "data": {
+    "catalog": "${DEMO_CATALOG}",
+    "schema": "${DEMO_SCHEMA}",
+    "tables": {
+      "shipments": "gold_shipments",
+      "inventory": "gold_inventory",
+      "deliveryPerformance": "gold_delivery_performance"
+    }
+  },
+
+  "branding": {
+    "appName": "Global Logistics Command Center"
+  },
+
+  // Scripted 3-min demo chain — the dock's "Suggested next" chip walks this.
+  // Step N unlocks once the previous assistant message contains a triggerAfter
+  // substring. See client/src/chat/script.ts.
+  "assistantScript": [
+    {
+      "prompt": "Why does the Southeast keep missing SLA?"
+    },
+    {
+      "prompt": "Draft a plan to clear the Southeast exception backlog — reroutes, escalations, and holds. Show me the batch before anything runs.",
+      "triggerAfter": ["southeast", "carrier", "exception", "swiftmed", "aerocare"]
+    },
+    {
+      "prompt": "Yes — execute the plan.",
+      "triggerAfter": ["reroute", "escalate", "draft", "plan", "approve"]
+    }
+  ]
+}

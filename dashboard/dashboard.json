@@ -1,0 +1,342 @@
+{
+  "datasets": [
+    {
+      "name": "ds_sla",
+      "displayName": "Delivery SLA metrics",
+      "queryLines": [
+        "SELECT `date`, region, ",
+        "CASE WHEN region='Southeast' THEN 'Southeast' ELSE 'Other regions' END AS region_group, ",
+        "carrier, priority, product_category, ",
+        "MEASURE(shipments) AS shipments, ",
+        "MEASURE(exceptions) AS exceptions, ",
+        "MEASURE(on_time) AS on_time, ",
+        "MEASURE(sla_pct) AS sla_pct, ",
+        "MEASURE(exception_rate) AS exception_rate, ",
+        "MEASURE(total_freight_usd) AS freight_usd, ",
+        "MEASURE(expedited_freight_usd) AS expedited_usd ",
+        "FROM mv_delivery_sla GROUP BY ALL"
+      ]
+    },
+    {
+      "name": "ds_shipments",
+      "displayName": "Shipments",
+      "queryLines": [
+        "SELECT shipment_id, ship_date, region, carrier, priority, product_category, status, ",
+        "is_exception, days_late, freight_cost_usd, dest_lat, dest_lng, ",
+        "CASE WHEN is_exception THEN 'Exception' ELSE 'On time' END AS outcome ",
+        "FROM gold_shipments"
+      ]
+    },
+    {
+      "name": "ds_inventory",
+      "displayName": "Backorder risk",
+      "queryLines": [
+        "SELECT warehouse_name, region, category, quantity_on_hand, reorder_point, shortfall_units ",
+        "FROM gold_inventory WHERE below_reorder = true"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "command_center",
+      "displayName": "Command Center",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# MedTranz Global — Logistics Command Center\n",
+                "**Maya Patel, Global Logistics Director.** The Southeast exception spike peaked ~3 weeks ago at **3× normal** on SwiftMed Freight + AeroCare Logistics express/emergency lanes — **$1.6M** in expedited freight + backorder risk. This page is the glance: watch the exception-rate line, the carrier/region bars, and the destination map. Page 2 is the deep-dive."
+              ]
+            }
+          },
+          "position": {"x": 0, "y": 0, "width": 12, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi_sla",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [{"name": "measure(sla_pct)", "expression": "MEASURE(`sla_pct`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "frame": {"title": "On-time delivery rate", "showTitle": true}, "encodings": {"value": {"fieldName": "measure(sla_pct)", "format": {"type": "number-percent", "decimalPlaces": {"type": "max", "places": 1}}, "displayName": "On-time rate"}}}
+          },
+          "position": {"x": 0, "y": 3, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi_exceptions",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [{"name": "sum(exceptions)", "expression": "SUM(`exceptions`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "frame": {"title": "Exceptions", "showTitle": true}, "encodings": {"value": {"fieldName": "sum(exceptions)", "format": {"type": "number-plain", "abbreviation": "compact", "decimalPlaces": {"type": "max", "places": 1}}, "displayName": "Exceptions"}}}
+          },
+          "position": {"x": 3, "y": 3, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi_expedited",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [{"name": "sum(expedited_usd)", "expression": "SUM(`expedited_usd`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "frame": {"title": "Expedited freight", "showTitle": true}, "encodings": {"value": {"fieldName": "sum(expedited_usd)", "format": {"type": "number-currency", "currencyCode": "USD", "abbreviation": "compact", "decimalPlaces": {"type": "max", "places": 1}}, "displayName": "Expedited $"}}}
+          },
+          "position": {"x": 6, "y": 3, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi_shipments",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [{"name": "sum(shipments)", "expression": "SUM(`shipments`)"}], "disaggregated": false}}],
+            "spec": {"version": 2, "widgetType": "counter", "frame": {"title": "Shipments", "showTitle": true}, "encodings": {"value": {"fieldName": "sum(shipments)", "format": {"type": "number-plain", "abbreviation": "compact", "decimalPlaces": {"type": "max", "places": 1}}, "displayName": "Shipments"}}}
+          },
+          "position": {"x": 9, "y": 3, "width": 3, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "exc_rate_trend",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [
+              {"name": "weekly(date)", "expression": "DATE_TRUNC(\"WEEK\", `date`)"},
+              {"name": "avg(exception_rate)", "expression": "AVG(`exception_rate`)"},
+              {"name": "region_group", "expression": "`region_group`"}
+            ], "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "line", "frame": {"showTitle": true, "title": "Weekly exception rate — Southeast vs rest"}, "encodings": {
+              "x": {"fieldName": "weekly(date)", "scale": {"type": "temporal"}, "displayName": "Week"},
+              "y": {"fieldName": "avg(exception_rate)", "scale": {"type": "quantitative"}, "format": {"type": "number-percent", "decimalPlaces": {"type": "max", "places": 1}}, "displayName": "Exception rate"},
+              "color": {"fieldName": "region_group", "scale": {"type": "categorical", "mappings": [{"value": "Southeast", "color": "#EF476F"}, {"value": "Other regions", "color": "#1E6FD9"}]}, "displayName": "Region"}
+            }}
+          },
+          "position": {"x": 0, "y": 6, "width": 12, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "exc_by_carrier_se",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [
+              {"name": "carrier", "expression": "`carrier`"},
+              {"name": "sum(exceptions)", "expression": "SUM(`exceptions`)"}
+            ], "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "bar", "frame": {"showTitle": true, "title": "Exceptions by carrier (all regions)"}, "encodings": {
+              "y": {"fieldName": "carrier", "scale": {"type": "categorical"}, "displayName": "Carrier"},
+              "x": {"fieldName": "sum(exceptions)", "scale": {"type": "quantitative"}, "displayName": "Exceptions"}
+            }}
+          },
+          "position": {"x": 0, "y": 12, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "exc_by_region",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [
+              {"name": "region", "expression": "`region`"},
+              {"name": "sum(exceptions)", "expression": "SUM(`exceptions`)"},
+              {"name": "priority", "expression": "`priority`"}
+            ], "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "bar", "frame": {"showTitle": true, "title": "Exceptions by region × priority"}, "encodings": {
+              "y": {"fieldName": "region", "scale": {"type": "categorical"}, "displayName": "Region"},
+              "x": {"fieldName": "sum(exceptions)", "scale": {"type": "quantitative"}, "displayName": "Exceptions"},
+              "color": {"fieldName": "priority", "scale": {"type": "categorical", "mappings": [{"value": "emergency", "color": "#EF476F"}, {"value": "express", "color": "#FFC43D"}, {"value": "standard", "color": "#1E6FD9"}]}, "displayName": "Priority"}
+            }}
+          },
+          "position": {"x": 6, "y": 12, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "exc_map",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_shipments", "fields": [
+              {"name": "dest_lat", "expression": "`dest_lat`"},
+              {"name": "dest_lng", "expression": "`dest_lng`"},
+              {"name": "count(shipment_id)", "expression": "COUNT(`shipment_id`)"},
+              {"name": "sum(freight_cost_usd)", "expression": "SUM(`freight_cost_usd`)"}
+            ], "disaggregated": false, "filters": [{"expression": "`is_exception` = true"}]}}],
+            "spec": {"version": 2, "widgetType": "symbol-map", "frame": {"showTitle": true, "title": "Exception shipments — destination hospitals"}, "mark": {"opacity": 1}, "encodings": {
+              "coordinates": {"latitude": {"fieldName": "dest_lat"}, "longitude": {"fieldName": "dest_lng"}},
+              "size": {"fieldName": "count(shipment_id)", "scale": {"type": "quantitative"}},
+              "color": {"fieldName": "sum(freight_cost_usd)", "scale": {"type": "quantitative", "colorRamp": {"mode": "custom-sequential", "colors": {"start": "#38B6FF", "end": "#EF476F"}}}}
+            }}
+          },
+          "position": {"x": 0, "y": 18, "width": 12, "height": 6}
+        }
+      ]
+    },
+    {
+      "name": "investigation",
+      "displayName": "Investigation",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "title2",
+            "multilineTextboxSpec": {"lines": [
+              "# Investigation — why is this happening?\n",
+              "The same exceptions split by priority, product category, lane, and cost. **Southeast express/emergency on SwiftMed + AeroCare** is the story — implants + capital_equipment lead, and expedited freight surged from ~$180K to ~$540K/week."
+            ]}
+          },
+          "position": {"x": 0, "y": 0, "width": 12, "height": 2}
+        },
+        {
+          "widget": {
+            "name": "exc_by_priority",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_shipments", "fields": [
+              {"name": "priority", "expression": "`priority`"},
+              {"name": "count(shipment_id)", "expression": "COUNT(`shipment_id`)"},
+              {"name": "outcome", "expression": "`outcome`"}
+            ], "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "bar", "frame": {"showTitle": true, "title": "Shipments by priority × outcome"}, "encodings": {
+              "x": {"fieldName": "priority", "scale": {"type": "categorical"}, "displayName": "Priority"},
+              "y": {"fieldName": "count(shipment_id)", "scale": {"type": "quantitative"}, "displayName": "Shipments"},
+              "color": {"fieldName": "outcome", "scale": {"type": "categorical", "mappings": [{"value": "Exception", "color": "#EF476F"}, {"value": "On time", "color": "#1E6FD9"}]}, "displayName": "Outcome"}
+            }}
+          },
+          "position": {"x": 0, "y": 2, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "exc_by_category",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_shipments", "fields": [
+              {"name": "product_category", "expression": "`product_category`"},
+              {"name": "count(shipment_id)", "expression": "COUNT(`shipment_id`)"}
+            ], "disaggregated": false, "filters": [{"expression": "`is_exception` = true"}]}}],
+            "spec": {"version": 3, "widgetType": "bar", "frame": {"showTitle": true, "title": "Exceptions by product category"}, "encodings": {
+              "y": {"fieldName": "product_category", "scale": {"type": "categorical"}, "displayName": "Category"},
+              "x": {"fieldName": "count(shipment_id)", "scale": {"type": "quantitative"}, "displayName": "Exceptions"},
+              "color": {"fieldName": "product_category", "scale": {"type": "categorical", "mappings": [{"value": "instruments", "color": "#1E6FD9"}, {"value": "implants", "color": "#0B3D91"}, {"value": "capital_equipment", "color": "#38B6FF"}]}, "displayName": "Category"}
+            }}
+          },
+          "position": {"x": 6, "y": 2, "width": 6, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "expedited_trend_se",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_sla", "fields": [
+              {"name": "weekly(date)", "expression": "DATE_TRUNC(\"WEEK\", `date`)"},
+              {"name": "sum(expedited_usd)", "expression": "SUM(`expedited_usd`)"}
+            ], "disaggregated": false, "filters": [{"expression": "`region` = 'Southeast'"}]}}],
+            "spec": {"version": 3, "widgetType": "line", "frame": {"showTitle": true, "title": "Weekly expedited freight — Southeast"}, "encodings": {
+              "x": {"fieldName": "weekly(date)", "scale": {"type": "temporal"}, "displayName": "Week"},
+              "y": {"fieldName": "sum(expedited_usd)", "scale": {"type": "quantitative"}, "format": {"type": "number-currency", "currencyCode": "USD", "abbreviation": "compact", "decimalPlaces": {"type": "max", "places": 1}}, "displayName": "Expedited freight $"},
+              "color": {"value": {"hex": "#EF476F"}}
+            }}
+          },
+          "position": {"x": 0, "y": 8, "width": 12, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "worst_lanes",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_shipments", "fields": [
+              {"name": "region", "expression": "`region`"},
+              {"name": "carrier", "expression": "`carrier`"},
+              {"name": "priority", "expression": "`priority`"},
+              {"name": "product_category", "expression": "`product_category`"},
+              {"name": "count(shipment_id)", "expression": "COUNT(`shipment_id`)"},
+              {"name": "avg(days_late)", "expression": "AVG(`days_late`)"},
+              {"name": "sum(freight_cost_usd)", "expression": "SUM(`freight_cost_usd`)"}
+            ], "disaggregated": false, "filters": [{"expression": "`is_exception` = true"}]}}],
+            "spec": {"version": 2, "widgetType": "table", "frame": {"showTitle": true, "title": "Worst lanes (exceptions)"}, "encodings": {"columns": [
+              {"fieldName": "region", "displayName": "Region"},
+              {"fieldName": "carrier", "displayName": "Carrier"},
+              {"fieldName": "priority", "displayName": "Priority"},
+              {"fieldName": "product_category", "displayName": "Category"},
+              {"fieldName": "count(shipment_id)", "displayName": "Exceptions"},
+              {"fieldName": "avg(days_late)", "displayName": "Avg days late", "format": {"type": "number-plain", "decimalPlaces": {"type": "exact", "places": 1}}},
+              {"fieldName": "sum(freight_cost_usd)", "displayName": "Freight $", "format": {"type": "number-currency", "currencyCode": "USD", "abbreviation": "compact", "decimalPlaces": {"type": "max", "places": 1}}}
+            ]}}
+          },
+          "position": {"x": 0, "y": 14, "width": 6, "height": 7}
+        },
+        {
+          "widget": {
+            "name": "backorder_risk",
+            "queries": [{"name": "main_query", "query": {"datasetName": "ds_inventory", "fields": [
+              {"name": "warehouse_name", "expression": "`warehouse_name`"},
+              {"name": "sum(shortfall_units)", "expression": "SUM(`shortfall_units`)"},
+              {"name": "category", "expression": "`category`"}
+            ], "disaggregated": false}}],
+            "spec": {"version": 3, "widgetType": "bar", "frame": {"showTitle": true, "title": "Backorder risk — below reorder point"}, "encodings": {
+              "y": {"fieldName": "warehouse_name", "scale": {"type": "categorical"}, "displayName": "Warehouse"},
+              "x": {"fieldName": "sum(shortfall_units)", "scale": {"type": "quantitative"}, "displayName": "Shortfall units"},
+              "color": {"fieldName": "category", "scale": {"type": "categorical", "mappings": [{"value": "instruments", "color": "#1E6FD9"}, {"value": "implants", "color": "#0B3D91"}, {"value": "capital_equipment", "color": "#38B6FF"}]}, "displayName": "Category"}
+            }}
+          },
+          "position": {"x": 6, "y": 14, "width": 6, "height": 7}
+        }
+      ]
+    },
+    {
+      "name": "filters",
+      "displayName": "Filters",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "filter_date",
+            "queries": [
+              {"name": "f_date_sla", "query": {"datasetName": "ds_sla", "fields": [{"name": "date", "expression": "`date`"}], "disaggregated": false}},
+              {"name": "f_date_ship", "query": {"datasetName": "ds_shipments", "fields": [{"name": "ship_date", "expression": "`ship_date`"}], "disaggregated": false}}
+            ],
+            "spec": {"version": 2, "widgetType": "filter-date-range-picker", "encodings": {"fields": [
+              {"fieldName": "date", "queryName": "f_date_sla"},
+              {"fieldName": "ship_date", "queryName": "f_date_ship"}
+            ]}, "frame": {"showTitle": true, "title": "Date range"}}
+          },
+          "position": {"x": 0, "y": 0, "width": 3, "height": 2}
+        },
+        {
+          "widget": {
+            "name": "filter_region",
+            "queries": [
+              {"name": "f_region_sla", "query": {"datasetName": "ds_sla", "fields": [{"name": "region", "expression": "`region`"}], "disaggregated": false}},
+              {"name": "f_region_ship", "query": {"datasetName": "ds_shipments", "fields": [{"name": "region", "expression": "`region`"}], "disaggregated": false}},
+              {"name": "f_region_inv", "query": {"datasetName": "ds_inventory", "fields": [{"name": "region", "expression": "`region`"}], "disaggregated": false}}
+            ],
+            "spec": {"version": 2, "widgetType": "filter-multi-select", "encodings": {"fields": [
+              {"fieldName": "region", "queryName": "f_region_sla", "displayName": "Region"},
+              {"fieldName": "region", "queryName": "f_region_ship"},
+              {"fieldName": "region", "queryName": "f_region_inv"}
+            ]}, "frame": {"showTitle": true, "title": "Region"}}
+          },
+          "position": {"x": 3, "y": 0, "width": 3, "height": 2}
+        },
+        {
+          "widget": {
+            "name": "filter_carrier",
+            "queries": [
+              {"name": "f_carrier_sla", "query": {"datasetName": "ds_sla", "fields": [{"name": "carrier", "expression": "`carrier`"}], "disaggregated": false}},
+              {"name": "f_carrier_ship", "query": {"datasetName": "ds_shipments", "fields": [{"name": "carrier", "expression": "`carrier`"}], "disaggregated": false}}
+            ],
+            "spec": {"version": 2, "widgetType": "filter-multi-select", "encodings": {"fields": [
+              {"fieldName": "carrier", "queryName": "f_carrier_sla", "displayName": "Carrier"},
+              {"fieldName": "carrier", "queryName": "f_carrier_ship"}
+            ]}, "frame": {"showTitle": true, "title": "Carrier"}}
+          },
+          "position": {"x": 6, "y": 0, "width": 3, "height": 2}
+        },
+        {
+          "widget": {
+            "name": "filter_priority",
+            "queries": [
+              {"name": "f_prio_sla", "query": {"datasetName": "ds_sla", "fields": [{"name": "priority", "expression": "`priority`"}], "disaggregated": false}},
+              {"name": "f_prio_ship", "query": {"datasetName": "ds_shipments", "fields": [{"name": "priority", "expression": "`priority`"}], "disaggregated": false}}
+            ],
+            "spec": {"version": 2, "widgetType": "filter-multi-select", "encodings": {"fields": [
+              {"fieldName": "priority", "queryName": "f_prio_sla", "displayName": "Priority"},
+              {"fieldName": "priority", "queryName": "f_prio_ship"}
+            ]}, "frame": {"showTitle": true, "title": "Priority"}}
+          },
+          "position": {"x": 9, "y": 0, "width": 3, "height": 2}
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {"light": "#F4F7FA", "dark": "#0F1419"},
+      "widgetBackgroundColor": {"light": "#FFFFFF", "dark": "#161B22"},
+      "widgetBorderColor": {"light": "#FFFFFF", "dark": "#161B22"},
+      "fontColor": {"light": "#1F2530", "dark": "#E8ECF0"},
+      "selectionColor": {"light": "#1E6FD9", "dark": "#8ACAFF"},
+      "visualizationColors": ["#0B3D91", "#1E6FD9", "#38B6FF", "#FFC43D", "#EF476F"],
+      "widgetHeaderAlignment": "LEFT"
+    },
+    "genieSpace": {
+      "isEnabled": true,
+      "overrideId": "01f1c20ba0651a31adcc6b02d70d13cb",
+      "enablementMode": "ENABLED"
+    }
+  }
+}

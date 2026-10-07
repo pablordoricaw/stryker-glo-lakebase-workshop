@@ -1,0 +1,75 @@
+{
+  "version": 2,
+  "config": {
+    "sample_questions": [
+      {"id": "a1000000000000000000000000000001", "question": ["What's our on-time delivery rate this month vs baseline?"]},
+      {"id": "a1000000000000000000000000000002", "question": ["Which region is driving the exception spike?"]},
+      {"id": "a1000000000000000000000000000003", "question": ["Within the Southeast, which carriers are missing SLA?"]},
+      {"id": "a1000000000000000000000000000004", "question": ["What kinds of Southeast shipments are failing - by priority and product category?"]},
+      {"id": "a1000000000000000000000000000005", "question": ["How much expedited freight is the Southeast costing us by week?"]},
+      {"id": "a1000000000000000000000000000006", "question": ["Which Southeast warehouses are below reorder point?"]},
+      {"id": "a1000000000000000000000000000007", "question": ["Is the Southeast exception rate recovering? Show the weekly trend."]}
+    ]
+  },
+  "data_sources": {
+    "metric_views": [
+      {"identifier": "solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_delivery_sla"}
+    ],
+    "tables": [
+      {"identifier": "solution_builder.demo_global_logistics_exception_cockpit_e302b2.gold_inventory",
+        "column_configs": [
+          {"column_name": "category", "enable_entity_matching": true},
+          {"column_name": "region", "enable_entity_matching": true, "enable_format_assistance": true}
+        ]},
+      {"identifier": "solution_builder.demo_global_logistics_exception_cockpit_e302b2.gold_shipments",
+        "column_configs": [
+          {"column_name": "carrier", "enable_entity_matching": true},
+          {"column_name": "destination_hospital_name", "enable_entity_matching": true},
+          {"column_name": "priority", "enable_entity_matching": true},
+          {"column_name": "product_category", "enable_entity_matching": true},
+          {"column_name": "region", "enable_entity_matching": true, "enable_format_assistance": true}
+        ]}
+    ]
+  },
+  "instructions": {
+    "example_question_sqls": [
+      {"id": "b1000000000000000000000000000001",
+        "question": ["What's our on-time delivery rate this month vs baseline?"],
+        "sql": ["SELECT DATE_TRUNC('WEEK', mv_delivery_sla.`date`) AS week, ROUND(MEASURE(mv_delivery_sla.sla_pct), 3) AS sla_pct, ROUND(MEASURE(mv_delivery_sla.exception_rate), 3) AS exception_rate FROM solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_delivery_sla WHERE mv_delivery_sla.`date` >= DATEADD(day, -56, current_date()) GROUP BY DATE_TRUNC('WEEK', mv_delivery_sla.`date`) ORDER BY week"]},
+      {"id": "b1000000000000000000000000000002",
+        "question": ["Which region is driving the exception spike?"],
+        "sql": ["SELECT mv_delivery_sla.region, MEASURE(mv_delivery_sla.exceptions) AS exceptions, ROUND(MEASURE(mv_delivery_sla.exception_rate), 3) AS exception_rate FROM solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_delivery_sla WHERE mv_delivery_sla.`date` >= DATEADD(day, -35, current_date()) GROUP BY mv_delivery_sla.region ORDER BY exceptions DESC"]},
+      {"id": "b1000000000000000000000000000003",
+        "question": ["Within the Southeast, which carriers are missing SLA?"],
+        "sql": ["SELECT mv_delivery_sla.carrier, MEASURE(mv_delivery_sla.exceptions) AS exceptions, ROUND(MEASURE(mv_delivery_sla.sla_pct), 3) AS sla_pct FROM solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_delivery_sla WHERE mv_delivery_sla.region = 'Southeast' AND mv_delivery_sla.`date` >= DATEADD(day, -35, current_date()) GROUP BY mv_delivery_sla.carrier ORDER BY exceptions DESC"]},
+      {"id": "b1000000000000000000000000000004",
+        "question": ["What kinds of Southeast shipments are failing - by priority and product category?"],
+        "sql": ["SELECT gold_shipments.priority, gold_shipments.product_category, COUNT(*) AS exceptions FROM solution_builder.demo_global_logistics_exception_cockpit_e302b2.gold_shipments WHERE gold_shipments.region = 'Southeast' AND gold_shipments.is_exception = true AND gold_shipments.ship_date >= DATEADD(day, -35, current_date()) GROUP BY gold_shipments.priority, gold_shipments.product_category ORDER BY exceptions DESC"]},
+      {"id": "b1000000000000000000000000000005",
+        "question": ["How much expedited freight is the Southeast costing us by week?"],
+        "sql": ["SELECT DATE_TRUNC('WEEK', mv_delivery_sla.`date`) AS week, ROUND(MEASURE(mv_delivery_sla.expedited_freight_usd)) AS expedited_freight_usd FROM solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_delivery_sla WHERE mv_delivery_sla.region = 'Southeast' AND mv_delivery_sla.`date` >= DATEADD(day, -70, current_date()) GROUP BY DATE_TRUNC('WEEK', mv_delivery_sla.`date`) ORDER BY week"]},
+      {"id": "b1000000000000000000000000000006",
+        "question": ["Which Southeast warehouses are below reorder point?"],
+        "sql": ["SELECT gold_inventory.warehouse_name, gold_inventory.category, SUM(gold_inventory.shortfall_units) AS shortfall_units FROM solution_builder.demo_global_logistics_exception_cockpit_e302b2.gold_inventory WHERE gold_inventory.region = 'Southeast' AND gold_inventory.below_reorder = true GROUP BY gold_inventory.warehouse_name, gold_inventory.category ORDER BY shortfall_units DESC"]},
+      {"id": "b1000000000000000000000000000007",
+        "question": ["Is the Southeast exception rate recovering? Show the weekly trend."],
+        "sql": ["SELECT DATE_TRUNC('WEEK', mv_delivery_sla.`date`) AS week, ROUND(MEASURE(mv_delivery_sla.exception_rate), 3) AS exception_rate FROM solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_delivery_sla WHERE mv_delivery_sla.region = 'Southeast' AND mv_delivery_sla.`date` >= DATEADD(day, -42, current_date()) GROUP BY DATE_TRUNC('WEEK', mv_delivery_sla.`date`) ORDER BY week"]}
+    ],
+    "text_instructions": [
+      {"id": "c1000000000000000000000000000001",
+        "content": [
+          "## PURPOSE",
+          "- Answer logistics exception questions for Maya Patel, Global Logistics Director at MedTranz Global (medical device manufacturer shipping to hospitals across 12 regions). Assume operational, non-technical fluency.",
+          "- A Southeast service-failure spike peaked ~3 weeks ago at 3x normal on SwiftMed Freight + AeroCare Logistics express/emergency lanes, driving $1.6M in expedited freight + backorder risk.",
+          "## DISAMBIGUATION",
+          "- Headline SLA / exception-rate / freight numbers come from mv_delivery_sla (same definitions as the dashboard KPIs). Per-shipment detail (which hospitals, lanes) comes from gold_shipments. Backorder risk comes from gold_inventory.",
+          "- 'this month' means the last 4 weeks unless the user gives a range. 'baseline' = normal exception rate ~6%.",
+          "## DATA QUALITY NOTES",
+          "- gold_shipments.is_exception is true for late or exception/delayed shipments. Recent (last ~3 days) shipments are still in_transit with null actual_delivery - exclude when discussing completed deliveries.",
+          "## Instructions you must follow when providing summaries",
+          "- State the date range used. Round rates to 3 decimals and dollars to whole numbers.",
+          "- When root-causing exceptions, walk region -> carrier -> priority/product_category -> cost, then name the Southeast + SwiftMed/AeroCare express/emergency lane as the driver and suggest reroute/escalate/hold actions."
+        ]}
+    ]
+  }
+}

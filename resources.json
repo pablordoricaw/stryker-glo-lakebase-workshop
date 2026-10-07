@@ -1,0 +1,38 @@
+{
+  "capabilities": {
+    "buildable": [
+      "synthetic-data-gen",
+      "sdp",
+      "aibi-dashboards",
+      "genie",
+      "metric-views",
+      "lakebase",
+      "databricks-apps",
+      "lakeflow-jobs"
+    ],
+    "talking_track": [
+      "unity-catalog",
+      "lakeflow-connect",
+      "genie-one",
+      "genie-code"
+    ]
+  },
+  "resource_suffix": "e302b2",
+  "created_resources": {
+    "catalog": "solution_builder",
+    "schema": "demo_global_logistics_exception_cockpit_e302b2",
+    "warehouse_id": "a94beda3aab06fa4",
+    "pipeline_id": "cd869e48-3a2c-4241-9b02-2268b77d97fe",
+    "metric_view_name": "solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_delivery_sla",
+    "resolution_metric_view_name": "solution_builder.demo_global_logistics_exception_cockpit_e302b2.mv_exception_resolution",
+    "genie_space_id": "01f1c20ba0651a31adcc6b02d70d13cb",
+    "dashboard_id": "01f1c20c122e16f7afcd27d2e3ae9908",
+    "job_id": "407728433833071",
+    "lakebase_project_id": "ea37610e-b53c-4c7f-8ab9-cea49abe7a2c",
+    "lakebase_project_slug": "dbdemos-asset-generator-6",
+    "lakebase_database": "dbgen_glcc_e302b2",
+    "app": {
+      "name": "dbgen-glcc"
+    }
+  }
+}
